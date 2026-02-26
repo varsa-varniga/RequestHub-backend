@@ -66,3 +66,11 @@ npm start
 User dashboard for creating and tracking requests
 
 Admin dashboard for approvals and request management
+
+# ReqZen
+
+## Phase 1: ER Diagram
+
+### Database Design
+
+![ER Diagram](docs/er-diagram-phase1.png)
