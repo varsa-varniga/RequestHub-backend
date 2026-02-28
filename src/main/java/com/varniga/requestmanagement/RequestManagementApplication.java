@@ -1,25 +1,12 @@
-# Maven build folder
-/target/
+package com.varniga.requestmanagement;
 
-        # IntelliJ project files
-/.idea/
-/*.iml
-/.vscode/
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
 
-# Windows system files
-Thumbs.db
-Desktop.ini
+@SpringBootApplication
+public class RequestManagementApplication {
 
-# Logs
-*.log
-
-# Spring Boot generated jars/war
-*.jar
-*.war
-
-# Environment / secrets
-/src/main/resources/application.properties
-
-# Temporary files
-*.tmp
-*.swp
+    public static void main(String[] args) {
+        SpringApplication.run(RequestManagementApplication.class, args);
+    }
+}
