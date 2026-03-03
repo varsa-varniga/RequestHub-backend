@@ -2,7 +2,6 @@ package com.varniga.requestmanagement.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
-
 import java.util.List;
 
 @Entity
@@ -29,21 +28,24 @@ public class Request extends BaseEntity {
 
     private Integer priorityScore;
 
+    // Current approval stage of the request
     private Integer currentStage = 1;
 
-    @ManyToOne
-    @JoinColumn(name = "created_by", nullable = false)
+    // CORRECT: single foreign key column for creator
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "created_by_id", referencedColumnName = "id", nullable = false)
     private User createdBy;
 
-    @ManyToOne
-    @JoinColumn(name = "assigned_to")
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "assigned_to_id", referencedColumnName = "id")
     private User assignedTo;
 
-    @ManyToOne
-    @JoinColumn(name = "status_id")
+    // Mapping to request status table
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "status_id", referencedColumnName = "id")
     private RequestStatus status;
 
+    // List of approval stages associated with this request
     @OneToMany(mappedBy = "request", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<ApprovalStage> approvalStages;
 }
-
