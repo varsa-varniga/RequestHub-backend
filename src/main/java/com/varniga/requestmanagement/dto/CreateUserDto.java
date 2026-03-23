@@ -14,5 +14,5 @@ public class CreateUserDto {
     private String name;
     private String email;
     private String password;
-    private Role role; // USER or ADMIN
+    private Role role; // USER, ADMIN, MANAGER, IT, COMPLIANCE
 }

@@ -9,5 +9,12 @@ import java.util.List;
 
 @Repository
 public interface RequestRepository extends JpaRepository<Request, Long> {
-    List<Request> findByCreatedBy(User user); // Fetch all requests by user
+
+    List<Request> findByCreatedBy(User user);
+
+    List<Request> findByAssignedTo(User user);
+
+    List<Request> findByStatus_Name(String statusName);
+
+    List<Request> findAllByOrderByPriorityScoreDesc();
 }

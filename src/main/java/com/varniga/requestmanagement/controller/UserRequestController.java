@@ -20,12 +20,17 @@ public class UserRequestController {
     @PostMapping
     public RequestResponseDto createRequest(@RequestBody CreateRequestDto dto,
                                             @AuthenticationPrincipal UserDetails userDetails) {
+
+        if (userDetails == null) {
+            throw new RuntimeException("User not authenticated");
+        }
+
         return requestService.createRequest(
                 dto.getTitle(),
                 dto.getDescription(),
                 dto.getType(),
                 dto.getUrgency(),
-                userDetails.getUsername() // logged-in email
+                userDetails.getUsername()
         );
     }
 

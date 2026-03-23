@@ -4,4 +4,6 @@ public enum Role {
     USER,
     ADMIN,
     MANAGER,
+    IT,
+    COMPLIANCE
 }
