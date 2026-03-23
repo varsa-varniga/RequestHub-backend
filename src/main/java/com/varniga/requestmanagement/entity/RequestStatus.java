@@ -1,8 +1,7 @@
 package com.varniga.requestmanagement.entity;
-import jakarta.persistence.*;
-import jakarta.persistence.Id;
-import lombok.*;
 
+import jakarta.persistence.*;
+import lombok.*;
 
 @Entity
 @Getter
@@ -26,4 +25,3 @@ public class RequestStatus extends BaseEntity {
 
     private Boolean isActive = true;
 }
-

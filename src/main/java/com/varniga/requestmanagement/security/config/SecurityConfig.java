@@ -6,9 +6,10 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.SecurityFilterChain;
 
 @Configuration
 @RequiredArgsConstructor
@@ -20,18 +21,15 @@ public class SecurityConfig {
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 
         http
-                .csrf(csrf -> csrf.disable())
+                .csrf(AbstractHttpConfigurer::disable)
+                .cors(Customizer.withDefaults())
                 .authorizeHttpRequests(auth -> auth
-                        // Allow anyone to create a new user
                         .requestMatchers("/users").permitAll()
-
-                        // Admin endpoints require ADMIN role
-                        .requestMatchers("/admin/**").hasRole("ADMIN")
-
-                        // User endpoints require USER or ADMIN role
-                        .requestMatchers("/user/**").hasAnyRole("USER", "ADMIN")
-
-                        // Any other requests require authentication
+                        .requestMatchers("/workflows/**").hasAnyAuthority("ADMIN")
+                        .requestMatchers("/approvals/**").hasAnyAuthority("ADMIN", "MANAGER")
+                        .requestMatchers("/requests/**").hasAnyAuthority("USER", "ADMIN", "MANAGER")
+                        .requestMatchers("/admin/**").hasAnyAuthority("ADMIN", "MANAGER")
+                        .requestMatchers("/user/**").hasAnyAuthority("USER", "ADMIN", "MANAGER")
                         .anyRequest().authenticated()
                 )
                 .httpBasic(Customizer.withDefaults());

@@ -17,11 +17,16 @@ public class UserController {
 
     @PostMapping
     public User createUser(@RequestBody CreateUserDto dto) {
+
+        if (dto.getRole() == null) {
+            throw new RuntimeException("Role is required");
+        }
+
         User user = User.builder()
                 .name(dto.getName())
                 .email(dto.getEmail())
                 .password(passwordEncoder.encode(dto.getPassword()))
-                .role(dto.getRole()) // assume USER or ADMIN
+                .role(dto.getRole()) // now supports all roles
                 .active(true)
                 .build();
 
