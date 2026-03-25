@@ -1,5 +1,6 @@
 package com.varniga.requestmanagement.entity;
 
+import com.varniga.requestmanagement.enums.Urgency;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -26,17 +27,23 @@ public class Request extends BaseEntity {
 
     private String requestType;
 
-    private String urgency;
+    // ── PHASE 2 CHANGE ────────────────────────────────────────────────────────
+    // urgency was String → now mapped as an @Enumerated column.
+    // DB column stays VARCHAR so existing rows are not broken;
+    // Hibernate stores the enum name ("LOW", "MEDIUM", "HIGH").
+    @Enumerated(EnumType.STRING)
+    @Column(name = "urgency", length = 20)
+    private Urgency urgency;
+    // ─────────────────────────────────────────────────────────────────────────
 
-    private Integer priorityScore;
+    // ── PHASE 2 FIELDS (already present in your entity — no structural change) ─
+    private Integer  priorityScore;          // set by PriorityService
+    private Boolean  escalated = false;      // set by EscalationService
+    private String   priorityLevel;          // P1/P2/P3 — optional label
+    private LocalDateTime slaDeadline;       // set by SlaService
+    // ─────────────────────────────────────────────────────────────────────────
 
-    private Boolean escalated = false;
-
-    private String priorityLevel; // P1, P2, P3
-
-    private Integer currentStageOrder = 1; // tracks workflow progress
-
-    private LocalDateTime slaDeadline;
+    private Integer currentStageOrder = 1;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "created_by_id", nullable = false)
@@ -44,7 +51,7 @@ public class Request extends BaseEntity {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "assigned_to_id")
-    private User assignedTo; // optional, can track who is currently approving
+    private User assignedTo;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "status_id")
@@ -60,66 +67,51 @@ public class Request extends BaseEntity {
     @OneToMany(mappedBy = "request", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<Comment> comments;
 
-    // --------------------------
-    // Helper Methods for Workflow
-    // --------------------------
+    // ── Workflow helpers (unchanged from your original) ───────────────────────
 
-    /** Check if this request is in the last workflow stage */
     public boolean isLastStage() {
         if (workflow == null || workflow.getStages() == null || workflow.getStages().isEmpty()) {
             return true;
         }
-
         int maxStage = workflow.getStages().stream()
                 .mapToInt(WorkflowStage::getStageOrder)
                 .max()
                 .orElse(currentStageOrder);
-
         return currentStageOrder >= maxStage;
     }
 
-    /** Move request to next stage, if exists */
     public void moveToNextStage() {
         if (getNextStage() != null) {
             currentStageOrder++;
         }
     }
 
-    /** Get current workflow stage object */
     public WorkflowStage getCurrentStage() {
         if (workflow == null || workflow.getStages() == null) return null;
-
         return workflow.getStages().stream()
                 .filter(stage -> stage.getStageOrder().equals(currentStageOrder))
                 .findFirst()
                 .orElse(null);
     }
 
-    /** Get next workflow stage object */
     public WorkflowStage getNextStage() {
         if (workflow == null || workflow.getStages() == null) return null;
-
         int nextOrder = currentStageOrder + 1;
-
         return workflow.getStages().stream()
                 .filter(stage -> stage.getStageOrder().equals(nextOrder))
                 .findFirst()
                 .orElse(null);
     }
 
-    /** Get all users assigned to the current stage */
     public List<User> getAssignedUsersForCurrentStage() {
         WorkflowStage stage = getCurrentStage();
-        return stage != null && stage.getAssignedUsers() != null ?
-                List.copyOf(stage.getAssignedUsers()) : List.of();
+        return stage != null && stage.getAssignedUsers() != null
+                ? List.copyOf(stage.getAssignedUsers()) : List.of();
     }
 
-    /** Get all users assigned to the next stage */
     public List<User> getAssignedUsersForNextStage() {
         WorkflowStage stage = getNextStage();
-        return stage != null && stage.getAssignedUsers() != null ?
-                List.copyOf(stage.getAssignedUsers()) : List.of();
+        return stage != null && stage.getAssignedUsers() != null
+                ? List.copyOf(stage.getAssignedUsers()) : List.of();
     }
-
-
 }
