@@ -26,10 +26,13 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/users").permitAll()
                         .requestMatchers("/workflows/**").hasAnyAuthority("ADMIN")
-                        .requestMatchers("/approvals/**").hasAnyAuthority("ADMIN", "MANAGER")
                         .requestMatchers("/requests/**").hasAnyAuthority("USER", "ADMIN", "MANAGER")
-                        .requestMatchers("/admin/**").hasAnyAuthority("ADMIN", "MANAGER")
+                        .requestMatchers("/approvals/**").hasAnyAuthority("USER","ADMIN","MANAGER","IT","COMPLIANCE")
+
                         .requestMatchers("/user/**").hasAnyAuthority("USER", "ADMIN", "MANAGER")
+                        .requestMatchers("/approvals/my").hasAnyAuthority("USER","ADMIN","MANAGER","IT","COMPLIANCE,USER")
+
+
                         .anyRequest().authenticated()
                 )
                 .httpBasic(Customizer.withDefaults());

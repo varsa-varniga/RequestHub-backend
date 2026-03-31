@@ -26,4 +26,17 @@ public class WorkflowController {
     public ResponseEntity<List<WorkflowResponseDto>> getAllWorkflows() {
         return ResponseEntity.ok(workflowService.getAllWorkflows());
     }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<String> deleteWorkflow(@PathVariable Long id) {
+        workflowService.deleteWorkflow(id);
+        return ResponseEntity.ok("Workflow deleted successfully");
+    }
+    @PutMapping("/{id}")
+    public ResponseEntity<WorkflowResponseDto> updateWorkflow(
+            @PathVariable Long id,
+            @RequestBody WorkflowDto workflowDto) {
+
+        return ResponseEntity.ok(workflowService.updateWorkflow(id, workflowDto));
+    }
 }

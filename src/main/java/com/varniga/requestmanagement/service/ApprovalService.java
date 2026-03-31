@@ -3,6 +3,7 @@ package com.varniga.requestmanagement.service;
 import com.varniga.requestmanagement.dto.RequestResponseDto;
 import com.varniga.requestmanagement.entity.*;
 import com.varniga.requestmanagement.enums.Decision;
+import com.varniga.requestmanagement.enums.NotificationType;
 import com.varniga.requestmanagement.repository.RequestRepository;
 import com.varniga.requestmanagement.repository.RequestStatusRepository;
 import com.varniga.requestmanagement.repository.UserRepository;
@@ -23,6 +24,9 @@ public class ApprovalService {
     private final AuthorizationService authorizationService;
     private final ApprovalHistoryService historyService;
 
+    private final PriorityService priorityService;
+    private final NotificationService notificationService;
+
     @Transactional
     public RequestResponseDto decide(Long requestId,
                                      Decision decision,
@@ -33,43 +37,80 @@ public class ApprovalService {
         Request request = requestRepository.findById(requestId)
                 .orElseThrow(() -> new RuntimeException("Request not found"));
 
-        // 2️⃣ Check request is still in a decidable state
+        // 2️⃣ Guard
         String currentStatus = request.getStatus() != null ? request.getStatus().getName() : "";
         if (currentStatus.equals("APPROVED") || currentStatus.equals("REJECTED")) {
-            throw new RuntimeException("Request is already " + currentStatus + " and cannot be acted on.");
+            throw new RuntimeException("Request is already " + currentStatus);
         }
 
-        // 3️⃣ Fetch approver
+        // 3️⃣ Fetch user
         User user = userRepository.findByEmailIgnoreCase(userEmail)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        // 4️⃣ Validate approver against current stage
+        // 4️⃣ Validate
         authorizationService.validateApprover(request, user);
 
-        WorkflowStage stage = workflowService.getCurrentStage(request);
+        WorkflowStage currentStage = workflowService.getCurrentStage(request);
 
         // 5️⃣ Save history
-        historyService.saveHistory(request, stage, user, decision, comment);
+        historyService.saveHistory(request, currentStage, user, decision, comment);
 
-        // 6️⃣ Handle decision
+        // 🔔 NOTIFICATIONS
+
         if (decision == Decision.APPROVED) {
+
             boolean hasNext = workflowService.moveToNextStage(request);
-            if (!hasNext) {
-                // All stages approved — finalize
+
+            if (hasNext) {
+                // 🔥 Notify next stage approvers
+                WorkflowStage nextStage = workflowService.getCurrentStage(request);
+
+                if (nextStage != null && nextStage.getAssignedUsers() != null) {
+                    for (User nextUser : nextStage.getAssignedUsers()) {
+                        notificationService.createNotification(
+                                nextUser.getId(),
+                                "A ticket is awaiting your approval: " + request.getTitle(),
+                                NotificationType.TICKET_ASSIGNED
+                        );
+                    }
+                }
+
+            } else {
+                // 🔥 Final approval
                 RequestStatus approved = statusRepository.findByName("APPROVED")
                         .orElseThrow(() -> new RuntimeException("APPROVED status not found"));
+
                 request.setStatus(approved);
+
+                // 🔔 Notify creator
+                notificationService.createNotification(
+                        request.getCreatedBy().getId(),
+                        "Your ticket has been APPROVED: " + request.getTitle(),
+                        NotificationType.APPROVED
+                );
             }
-            // else status stays PENDING, just moved to next stage
+
         } else {
-            // Rejected — mark as REJECTED, reset stage to beginning for resubmission
+            // 🔥 Rejected
             RequestStatus rejected = statusRepository.findByName("REJECTED")
                     .orElseThrow(() -> new RuntimeException("REJECTED status not found"));
+
             request.setStatus(rejected);
-            request.setCurrentStageOrder(1); // reset for resubmission
+            request.setCurrentStageOrder(1);
+
+            // 🔔 Notify creator
+            notificationService.createNotification(
+                    request.getCreatedBy().getId(),
+                    "Your ticket has been REJECTED: " + request.getTitle(),
+                    NotificationType.REJECTED
+            );
         }
 
+        // 🔁 Update priority
+        request.setPriorityScore(priorityService.calculatePriorityScore(request));
+
         requestRepository.save(request);
+
         return mapToDto(request);
     }
 
@@ -79,12 +120,10 @@ public class ApprovalService {
         Request request = requestRepository.findById(requestId)
                 .orElseThrow(() -> new RuntimeException("Request not found"));
 
-        // Only the original creator can resubmit
         if (!request.getCreatedBy().getEmail().equalsIgnoreCase(userEmail)) {
             throw new RuntimeException("Only the request creator can resubmit.");
         }
 
-        // Only REJECTED requests can be resubmitted
         if (!request.getStatus().getName().equals("REJECTED")) {
             throw new RuntimeException("Only rejected requests can be resubmitted.");
         }
@@ -93,13 +132,31 @@ public class ApprovalService {
                 .orElseThrow(() -> new RuntimeException("PENDING status not found"));
 
         request.setStatus(pending);
-        request.setCurrentStageOrder(1); // restart from stage 1
+        request.setCurrentStageOrder(1);
+        request.setEscalated(false);
+
+        request.setPriorityScore(priorityService.calculatePriorityScore(request));
 
         requestRepository.save(request);
+
+        // 🔔 Notify first stage approvers
+        WorkflowStage firstStage = workflowService.getCurrentStage(request);
+
+        if (firstStage != null && firstStage.getAssignedUsers() != null) {
+            for (User approver : firstStage.getAssignedUsers()) {
+                notificationService.createNotification(
+                        approver.getId(),
+                        "A ticket has been resubmitted: " + request.getTitle(),
+                        NotificationType.TICKET_ASSIGNED
+                );
+            }
+        }
+
         return mapToDto(request);
     }
 
     private RequestResponseDto mapToDto(Request request) {
+
         WorkflowStage stage = workflowService.getCurrentStage(request);
         ApprovalHistory latest = historyService.getLatestHistory(request);
 
@@ -113,13 +170,17 @@ public class ApprovalService {
                 .id(request.getId())
                 .title(request.getTitle())
                 .description(request.getDescription())
-                .requestType(request.getRequestType())
-                .urgency(request.getUrgency())
+                .requestTypeCode(request.getRequestType() != null ? request.getRequestType().getCode() : null)
+                .requestTypeName(request.getRequestType() != null ? request.getRequestType().getName() : null)
+                .urgency(request.getUrgency() != null ? request.getUrgency().name() : null)
                 .status(request.getStatus() != null ? request.getStatus().getName() : "UNKNOWN")
                 .createdBy(request.getCreatedBy() != null ? request.getCreatedBy().getEmail() : "UNKNOWN")
-                .stageNumber(stage != null ? stage.getStageOrder() : null)
+                .currentStageOrder(stage != null ? stage.getStageOrder() : null)
                 .approvalComment(latest != null ? latest.getComment() : null)
                 .assignedTo(assignedEmails)
+                .priorityScore(request.getPriorityScore())
+                .slaDeadline(request.getSlaDeadline())
+                .escalated(request.getEscalated())
                 .build();
     }
 }

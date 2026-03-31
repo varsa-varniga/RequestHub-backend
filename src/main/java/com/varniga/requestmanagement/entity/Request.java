@@ -1,9 +1,11 @@
 package com.varniga.requestmanagement.entity;
 
+import com.varniga.requestmanagement.enums.Urgency;
 import jakarta.persistence.*;
 import lombok.*;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 @Entity
@@ -24,19 +26,38 @@ public class Request extends BaseEntity {
     @Column(length = 2000)
     private String description;
 
-    private String requestType;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "request_type_id")
+    private RequestType requestType;
 
-    private String urgency;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "urgency", length = 20)
+    private Urgency urgency;
+
+    // ─────────────────────────────────────────────
+    // WORKFLOW FIELDS
+    // ─────────────────────────────────────────────
 
     private Integer priorityScore;
 
+    @Builder.Default
     private Boolean escalated = false;
 
-    private String priorityLevel; // P1, P2, P3
-
-    private Integer currentStageOrder = 1; // tracks workflow progress
+    private String priorityLevel;
 
     private LocalDateTime slaDeadline;
+
+    // optional fallback/debug only
+    @Builder.Default
+    private Integer currentStageOrder = 1;
+
+    // ─────────────────────────────────────────────
+    // RELATIONS
+    // ─────────────────────────────────────────────
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "current_stage_id")
+    private WorkflowStage currentStage;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "created_by_id", nullable = false)
@@ -44,7 +65,7 @@ public class Request extends BaseEntity {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "assigned_to_id")
-    private User assignedTo; // optional, can track who is currently approving
+    private User assignedTo;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "status_id")
@@ -54,52 +75,27 @@ public class Request extends BaseEntity {
     @JoinColumn(name = "workflow_id")
     private Workflow workflow;
 
-    @OneToMany(mappedBy = "request", cascade = CascadeType.ALL, orphanRemoval = true)
-    private List<ApprovalHistory> approvalHistory;
+    // ─────────────────────────────────────────────
+    // CHILD TABLES
+    // ─────────────────────────────────────────────
 
     @OneToMany(mappedBy = "request", cascade = CascadeType.ALL, orphanRemoval = true)
-    private List<Comment> comments;
+    private List<ApprovalHistory> approvalHistory = new ArrayList<>();
 
-    // --------------------------
-    // Helper Methods for Workflow
-    // --------------------------
+    @OneToMany(mappedBy = "request", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<Comment> comments = new ArrayList<>();
 
-    /** Check if this request is in the last workflow stage */
-    public boolean isLastStage() {
-        if (workflow == null || workflow.getStages() == null || workflow.getStages().isEmpty()) {
-            return true;
-        }
+    @OneToMany(mappedBy = "request", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<ApprovalStage> approvalStages = new ArrayList<>();
 
-        int maxStage = workflow.getStages().stream()
-                .mapToInt(WorkflowStage::getStageOrder)
-                .max()
-                .orElse(currentStageOrder);
+    // ─────────────────────────────────────────────
+    // WORKFLOW LOGIC
+    // ─────────────────────────────────────────────
 
-        return currentStageOrder >= maxStage;
-    }
-
-    /** Move request to next stage, if exists */
-    public void moveToNextStage() {
-        if (getNextStage() != null) {
-            currentStageOrder++;
-        }
-    }
-
-    /** Get current workflow stage object */
-    public WorkflowStage getCurrentStage() {
-        if (workflow == null || workflow.getStages() == null) return null;
-
-        return workflow.getStages().stream()
-                .filter(stage -> stage.getStageOrder().equals(currentStageOrder))
-                .findFirst()
-                .orElse(null);
-    }
-
-    /** Get next workflow stage object */
     public WorkflowStage getNextStage() {
-        if (workflow == null || workflow.getStages() == null) return null;
+        if (workflow == null || workflow.getStages() == null || currentStage == null) return null;
 
-        int nextOrder = currentStageOrder + 1;
+        int nextOrder = currentStage.getStageOrder() + 1;
 
         return workflow.getStages().stream()
                 .filter(stage -> stage.getStageOrder().equals(nextOrder))
@@ -107,19 +103,45 @@ public class Request extends BaseEntity {
                 .orElse(null);
     }
 
-    /** Get all users assigned to the current stage */
+    public boolean isLastStage() {
+        if (workflow == null || workflow.getStages() == null || currentStage == null) {
+            return true;
+        }
+
+        int maxStage = workflow.getStages().stream()
+                .mapToInt(WorkflowStage::getStageOrder)
+                .max()
+                .orElse(currentStage.getStageOrder());
+
+        return currentStage.getStageOrder() >= maxStage;
+    }
+
+    public void moveToNextStage() {
+        WorkflowStage next = getNextStage();
+
+        if (next != null) {
+            this.currentStage = next;
+            this.currentStageOrder = next.getStageOrder();
+        }
+    }
+
+    // ─────────────────────────────────────────────
+    // HELPERS
+    // ─────────────────────────────────────────────
+
     public List<User> getAssignedUsersForCurrentStage() {
-        WorkflowStage stage = getCurrentStage();
-        return stage != null && stage.getAssignedUsers() != null ?
-                List.copyOf(stage.getAssignedUsers()) : List.of();
+        if (currentStage == null || currentStage.getAssignedUsers() == null) {
+            return List.of();
+        }
+        return List.copyOf(currentStage.getAssignedUsers());
     }
 
-    /** Get all users assigned to the next stage */
     public List<User> getAssignedUsersForNextStage() {
-        WorkflowStage stage = getNextStage();
-        return stage != null && stage.getAssignedUsers() != null ?
-                List.copyOf(stage.getAssignedUsers()) : List.of();
+        WorkflowStage next = getNextStage();
+
+        if (next == null || next.getAssignedUsers() == null) {
+            return List.of();
+        }
+        return List.copyOf(next.getAssignedUsers());
     }
-
-
 }

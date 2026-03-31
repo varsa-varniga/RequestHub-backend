@@ -50,4 +50,22 @@ public class ApproverController {
 
         return ResponseEntity.ok(approvalService.resubmit(id, user.getUsername()));
     }
+    @GetMapping("/test")
+    public String test() {
+        return "working";
+    }
+
+    @GetMapping("/my")
+    public ResponseEntity<List<RequestResponseDto>> getMyApprovals(
+            @RequestParam(required = false, defaultValue = "ALL") String status,
+            @AuthenticationPrincipal UserDetails user) {
+
+        if (user == null) {
+            throw new RuntimeException("User not authenticated");
+        }
+
+        return ResponseEntity.ok(
+                requestService.getMyApprovals(user.getUsername(), status)
+        );
+    }
 }
