@@ -3,6 +3,7 @@ package com.varniga.requestmanagement.service;
 import com.varniga.requestmanagement.dto.RequestResponseDto;
 import com.varniga.requestmanagement.entity.*;
 import com.varniga.requestmanagement.enums.Decision;
+import com.varniga.requestmanagement.enums.NotificationType;
 import com.varniga.requestmanagement.repository.RequestRepository;
 import com.varniga.requestmanagement.repository.RequestStatusRepository;
 import com.varniga.requestmanagement.repository.UserRepository;
@@ -16,16 +17,15 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ApprovalService {
 
-    private final RequestRepository       requestRepository;
-    private final UserRepository          userRepository;
+    private final RequestRepository requestRepository;
+    private final UserRepository userRepository;
     private final RequestStatusRepository statusRepository;
-    private final WorkflowService         workflowService;
-    private final AuthorizationService    authorizationService;
-    private final ApprovalHistoryService  historyService;
+    private final WorkflowService workflowService;
+    private final AuthorizationService authorizationService;
+    private final ApprovalHistoryService historyService;
 
-    // ── PHASE 2: inject PriorityService ──────────────────────────────────────
-    private final PriorityService priorityService; // ← NEW
-    // ─────────────────────────────────────────────────────────────────────────
+    private final PriorityService priorityService;
+    private final NotificationService notificationService;
 
     @Transactional
     public RequestResponseDto decide(Long requestId,
@@ -37,47 +37,80 @@ public class ApprovalService {
         Request request = requestRepository.findById(requestId)
                 .orElseThrow(() -> new RuntimeException("Request not found"));
 
-        // 2️⃣ Guard: already terminal
+        // 2️⃣ Guard
         String currentStatus = request.getStatus() != null ? request.getStatus().getName() : "";
         if (currentStatus.equals("APPROVED") || currentStatus.equals("REJECTED")) {
-            throw new RuntimeException("Request is already " + currentStatus + " and cannot be acted on.");
+            throw new RuntimeException("Request is already " + currentStatus);
         }
 
-        // 3️⃣ Fetch approver
+        // 3️⃣ Fetch user
         User user = userRepository.findByEmailIgnoreCase(userEmail)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        // 4️⃣ Validate approver against current stage
+        // 4️⃣ Validate
         authorizationService.validateApprover(request, user);
 
-        WorkflowStage stage = workflowService.getCurrentStage(request);
+        WorkflowStage currentStage = workflowService.getCurrentStage(request);
 
-        // 5️⃣ Persist history entry
-        historyService.saveHistory(request, stage, user, decision, comment);
+        // 5️⃣ Save history
+        historyService.saveHistory(request, currentStage, user, decision, comment);
 
-        // 6️⃣ Handle decision
+        // 🔔 NOTIFICATIONS
+
         if (decision == Decision.APPROVED) {
+
             boolean hasNext = workflowService.moveToNextStage(request);
-            if (!hasNext) {
+
+            if (hasNext) {
+                // 🔥 Notify next stage approvers
+                WorkflowStage nextStage = workflowService.getCurrentStage(request);
+
+                if (nextStage != null && nextStage.getAssignedUsers() != null) {
+                    for (User nextUser : nextStage.getAssignedUsers()) {
+                        notificationService.createNotification(
+                                nextUser.getId(),
+                                "A ticket is awaiting your approval: " + request.getTitle(),
+                                NotificationType.TICKET_ASSIGNED
+                        );
+                    }
+                }
+
+            } else {
+                // 🔥 Final approval
                 RequestStatus approved = statusRepository.findByName("APPROVED")
                         .orElseThrow(() -> new RuntimeException("APPROVED status not found"));
+
                 request.setStatus(approved);
+
+                // 🔔 Notify creator
+                notificationService.createNotification(
+                        request.getCreatedBy().getId(),
+                        "Your ticket has been APPROVED: " + request.getTitle(),
+                        NotificationType.APPROVED
+                );
             }
-            // else stays PENDING, advanced to next stage
+
         } else {
+            // 🔥 Rejected
             RequestStatus rejected = statusRepository.findByName("REJECTED")
                     .orElseThrow(() -> new RuntimeException("REJECTED status not found"));
+
             request.setStatus(rejected);
             request.setCurrentStageOrder(1);
+
+            // 🔔 Notify creator
+            notificationService.createNotification(
+                    request.getCreatedBy().getId(),
+                    "Your ticket has been REJECTED: " + request.getTitle(),
+                    NotificationType.REJECTED
+            );
         }
 
-        // ── PHASE 2: recalculate priorityScore after every decision ──────────
-        // The time-pending component grows with each passing hour, so
-        // refreshing here keeps the score accurate for priority-ordered listings.
-        request.setPriorityScore(priorityService.calculatePriorityScore(request)); // ← NEW
-        // ─────────────────────────────────────────────────────────────────────
+        // 🔁 Update priority
+        request.setPriorityScore(priorityService.calculatePriorityScore(request));
 
         requestRepository.save(request);
+
         return mapToDto(request);
     }
 
@@ -100,19 +133,31 @@ public class ApprovalService {
 
         request.setStatus(pending);
         request.setCurrentStageOrder(1);
+        request.setEscalated(false);
 
-        // ── PHASE 2: reset escalation flag + refresh score on resubmit ───────
-        request.setEscalated(false);                                          // ← NEW
-        request.setPriorityScore(priorityService.calculatePriorityScore(request)); // ← NEW
-        // ─────────────────────────────────────────────────────────────────────
+        request.setPriorityScore(priorityService.calculatePriorityScore(request));
 
         requestRepository.save(request);
+
+        // 🔔 Notify first stage approvers
+        WorkflowStage firstStage = workflowService.getCurrentStage(request);
+
+        if (firstStage != null && firstStage.getAssignedUsers() != null) {
+            for (User approver : firstStage.getAssignedUsers()) {
+                notificationService.createNotification(
+                        approver.getId(),
+                        "A ticket has been resubmitted: " + request.getTitle(),
+                        NotificationType.TICKET_ASSIGNED
+                );
+            }
+        }
+
         return mapToDto(request);
     }
 
-    // ── mapToDto (urgency now Enum, Phase 2 fields added) ────────────────────
     private RequestResponseDto mapToDto(Request request) {
-        WorkflowStage stage    = workflowService.getCurrentStage(request);
+
+        WorkflowStage stage = workflowService.getCurrentStage(request);
         ApprovalHistory latest = historyService.getLatestHistory(request);
 
         String assignedEmails = stage != null && stage.getAssignedUsers() != null
@@ -125,14 +170,14 @@ public class ApprovalService {
                 .id(request.getId())
                 .title(request.getTitle())
                 .description(request.getDescription())
-                .requestType(request.getRequestType())
-                .urgency(request.getUrgency() != null ? request.getUrgency().name() : null) // ← PHASE 2
+                .requestTypeCode(request.getRequestType() != null ? request.getRequestType().getCode() : null)
+                .requestTypeName(request.getRequestType() != null ? request.getRequestType().getName() : null)
+                .urgency(request.getUrgency() != null ? request.getUrgency().name() : null)
                 .status(request.getStatus() != null ? request.getStatus().getName() : "UNKNOWN")
                 .createdBy(request.getCreatedBy() != null ? request.getCreatedBy().getEmail() : "UNKNOWN")
-                .stageNumber(stage != null ? stage.getStageOrder() : null)
+                .currentStageOrder(stage != null ? stage.getStageOrder() : null)
                 .approvalComment(latest != null ? latest.getComment() : null)
                 .assignedTo(assignedEmails)
-                // ── PHASE 2: new DTO fields ───────────────────────────────────
                 .priorityScore(request.getPriorityScore())
                 .slaDeadline(request.getSlaDeadline())
                 .escalated(request.getEscalated())

@@ -1,8 +1,11 @@
 package com.varniga.requestmanagement.service;
 
+import com.varniga.requestmanagement.dto.CommentDto;
+import com.varniga.requestmanagement.dto.CreateRequestDto;
 import com.varniga.requestmanagement.dto.RequestResponseDto;
 import com.varniga.requestmanagement.entity.*;
 import com.varniga.requestmanagement.enums.Decision;
+import com.varniga.requestmanagement.enums.NotificationType;
 import com.varniga.requestmanagement.enums.Urgency;
 import com.varniga.requestmanagement.repository.*;
 import lombok.RequiredArgsConstructor;
@@ -15,123 +18,186 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class RequestService {
 
-    private final RequestRepository      requestRepository;
-    private final UserRepository         userRepository;
+    private final RequestRepository requestRepository;
+    private final UserRepository userRepository;
     private final RequestStatusRepository statusRepository;
-    private final WorkflowRepository     workflowRepository;
-    private final WorkflowService        workflowService;
+    private final WorkflowRepository workflowRepository;
+    private final RequestTypeRepository requestTypeRepository;
+
     private final ApprovalHistoryService historyService;
+    private final PriorityService priorityService;
+    private final NotificationService notificationService;
+    private final SlaService slaService;
 
-    // ── PHASE 2: inject new services ─────────────────────────────────────────
-    private final PriorityService priorityService;  // ← NEW
-    private final SlaService      slaService;       // ← NEW
-    // ─────────────────────────────────────────────────────────────────────────
+    // =========================
+    // CREATE REQUEST (FIXED)
+    // =========================
+    public RequestResponseDto createRequest(CreateRequestDto dto, String userEmail) {
 
-    // ✅ CREATE REQUEST WITH DYNAMIC WORKFLOW
-    public RequestResponseDto createRequest(String title,
-                                            String description,
-                                            String type,
-                                            String urgencyStr,   // still accepted as String from controller
-                                            String userEmail) {
-
-        // 1️⃣ Fetch user
+        // 1. USER
         User user = userRepository.findByEmailIgnoreCase(userEmail)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        // 2️⃣ Fetch PENDING status
+        // 2. REQUEST TYPE (FIXED)
+        RequestType requestType = requestTypeRepository.findByCode(dto.getRequestTypeCode())
+                .orElseThrow(() -> new RuntimeException("Invalid request type"));
+
+        // 3. STATUS
         RequestStatus pendingStatus = statusRepository.findByName("PENDING")
                 .orElseThrow(() -> new RuntimeException("Status not found"));
 
-        // 3️⃣ Fetch workflow matching request type
-        Workflow workflow = workflowRepository.findByRequestType(type)
-                .orElseThrow(() -> new RuntimeException("No workflow configured for request type: " + type));
+        // 4. WORKFLOW
+        Workflow workflow = workflowRepository
+                .findByRequestType_Code(dto.getRequestTypeCode())
+                .orElseThrow(() -> new RuntimeException("No workflow for request type"));
 
-        // 4️⃣ Get first stage
+        // 5. FIRST STAGE
         WorkflowStage firstStage = workflow.getStages().stream()
                 .filter(s -> s.getStageOrder() == 1)
                 .findFirst()
-                .orElseThrow(() -> new RuntimeException("No stage configured for first order"));
+                .orElseThrow(() -> new RuntimeException("No first stage configured"));
 
-        // 5️⃣ Assign first approver
-        User assignedTo = firstStage.getAssignedUsers() != null && !firstStage.getAssignedUsers().isEmpty()
+        // 6. URGENCY
+        Urgency urgency;
+        try {
+            urgency = Urgency.valueOf(dto.getUrgency().toUpperCase());
+        } catch (Exception e) {
+            throw new RuntimeException("Invalid urgency value");
+        }
+
+        // 7. ASSIGNED USER
+        User assignedTo = (firstStage.getAssignedUsers() != null &&
+                !firstStage.getAssignedUsers().isEmpty())
                 ? firstStage.getAssignedUsers().iterator().next()
                 : null;
 
-        // ── PHASE 2: convert urgency String → Enum ───────────────────────────
-        Urgency urgency;
-        try {
-            urgency = Urgency.valueOf(urgencyStr.toUpperCase());
-        } catch (IllegalArgumentException | NullPointerException e) {
-            throw new RuntimeException("Invalid urgency value: " + urgencyStr
-                    + ". Accepted values: LOW, MEDIUM, HIGH");
-        }
-        // ─────────────────────────────────────────────────────────────────────
-
-        // 6️⃣ Build request (urgency now stored as Enum)
+        // 8. BUILD REQUEST
         Request request = Request.builder()
-                .title(title)
-                .description(description)
-                .requestType(type)
-                .urgency(urgency)                                    // ← PHASE 2: Enum
+                .title(dto.getTitle())
+                .description(dto.getDescription())
+                .requestType(requestType)
+                .urgency(urgency)
                 .createdBy(user)
                 .status(pendingStatus)
                 .workflow(workflow)
+                .currentStage(firstStage)
                 .currentStageOrder(1)
                 .assignedTo(assignedTo)
-                .escalated(false)                                    // ← PHASE 2
+                .escalated(false)
                 .build();
 
-        // ── PHASE 2: set SLA deadline before first save ──────────────────────
-        // urgency.name() gives the String the SlaService expects ("HIGH" etc.)
+        // 9. SLA
         request.setSlaDeadline(
-                slaService.calculateDeadline(type, urgency.name())  // ← PHASE 2
+                slaService.calculateDeadline(requestType.getCode(), urgency.name())
         );
-        // ─────────────────────────────────────────────────────────────────────
 
-        // First save to get the generated id + createdAt from BaseEntity
+        // 10. SAVE
         Request saved = requestRepository.save(request);
 
-        // ── PHASE 2: calculate priorityScore after save (needs createdAt) ────
-        saved.setPriorityScore(priorityService.calculatePriorityScore(saved)); // ← PHASE 2
+        // 11. PRIORITY
+        saved.setPriorityScore(priorityService.calculatePriorityScore(saved));
         saved = requestRepository.save(saved);
-        // ─────────────────────────────────────────────────────────────────────
 
-        // 7️⃣ Create initial approval history
-        historyService.saveHistory(saved, firstStage, user, Decision.PENDING, "Request created");
+        // 12. NOTIFICATIONS
+        if (assignedTo != null) {
+            notificationService.createNotification(
+                    assignedTo.getId(),
+                    "New ticket assigned: " + saved.getTitle(),
+                    NotificationType.TICKET_ASSIGNED
+            );
+        }
+
+        notificationService.createNotification(
+                user.getId(),
+                "Ticket created: " + saved.getTitle(),
+                NotificationType.TICKET_CREATED
+        );
+
+        // 13. HISTORY
+        historyService.saveHistory(
+                saved,
+                firstStage,
+                user,
+                Decision.PENDING,
+                "Request created"
+        );
 
         return mapToDto(saved);
     }
 
-    // ✅ FETCH USER REQUESTS (unchanged)
+    // =========================
+    // USER REQUESTS
+    // =========================
     public List<RequestResponseDto> getUserRequests(String email) {
         User user = userRepository.findByEmailIgnoreCase(email)
                 .orElseThrow(() -> new RuntimeException("User not found"));
-        return requestRepository.findByCreatedBy(user).stream()
+
+        return requestRepository.findByCreatedBy(user)
+                .stream()
                 .map(this::mapToDto)
                 .collect(Collectors.toList());
     }
 
-    // ✅ FETCH ALL REQUESTS (unchanged)
+    // =========================
+    // ALL REQUESTS
+    // =========================
     public List<RequestResponseDto> getAllRequests() {
-        return requestRepository.findAll().stream()
+        return requestRepository.findAll()
+                .stream()
                 .map(this::mapToDto)
                 .collect(Collectors.toList());
     }
 
-    // ── PHASE 2: NEW – fetch requests sorted by priority score descending ────
+    //========================
+    //MY APPROVALS
+    //========================
+
+    public List<RequestResponseDto> getMyApprovals(String email, String status) {
+        if (status == null || status.equalsIgnoreCase("ALL")) {
+            return requestRepository
+                    .findDistinctByWorkflow_Stages_AssignedUsers_Email(email)
+                    .stream()
+                    .map(this::mapToDto)
+                    .toList();
+        }
+
+        return requestRepository
+                .findDistinctByWorkflow_Stages_AssignedUsers_EmailAndStatus_Name(email, status)
+                .stream()
+                .map(this::mapToDto)
+                .toList();
+    }
+
+
+
+    // =========================
+    // PRIORITY SORTED
+    // =========================
     public List<RequestResponseDto> getAllRequestsByPriority() {
-        return requestRepository.findAllByOrderByPriorityScoreDesc().stream()
+        return requestRepository.findAllByOrderByPriorityScoreDesc()
+                .stream()
                 .map(this::mapToDto)
                 .collect(Collectors.toList());
     }
-    // ─────────────────────────────────────────────────────────────────────────
 
-    // ✅ MAP REQUEST → DTO  (urgency now serialised from Enum)
+
+    // =========================
+    // MAPPER
+    // =========================
     private RequestResponseDto mapToDto(Request request) {
-        WorkflowStage stage  = workflowService.getCurrentStage(request);
-        ApprovalHistory latest = historyService.getLatestHistory(request);
 
-        String assignedEmails = stage != null && stage.getAssignedUsers() != null
+        WorkflowStage stage = request.getCurrentStage();
+        ApprovalHistory latest = historyService.getLatestHistory(request);
+        List<CommentDto> comments = historyService.getHistoryByRequest(request)
+                .stream()
+                .map(h -> CommentDto.builder()
+                        .author(h.getApprovedBy() != null ? h.getApprovedBy().getEmail() : "SYSTEM")
+                        .message(h.getComment())
+                        .createdAt(h.getCreatedAt())
+                        .build())
+                .collect(Collectors.toList());
+
+        String assignedEmails = (stage != null && stage.getAssignedUsers() != null)
                 ? stage.getAssignedUsers().stream()
                 .map(User::getEmail)
                 .collect(Collectors.joining(", "))
@@ -141,15 +207,16 @@ public class RequestService {
                 .id(request.getId())
                 .title(request.getTitle())
                 .description(request.getDescription())
-                .requestType(request.getRequestType())
-                // ── PHASE 2: urgency is Enum → emit its name string ──────────
+                .requestTypeCode(request.getRequestType() != null ? request.getRequestType().getCode() : null)
+                .requestTypeName(request.getRequestType() != null ? request.getRequestType().getName() : null)
                 .urgency(request.getUrgency() != null ? request.getUrgency().name() : null)
                 .status(request.getStatus() != null ? request.getStatus().getName() : "UNKNOWN")
                 .createdBy(request.getCreatedBy() != null ? request.getCreatedBy().getEmail() : "UNKNOWN")
-                .stageNumber(stage != null ? stage.getStageOrder() : null)
+                .currentStageOrder(stage != null ? stage.getStageOrder() : null)
+                .currentStageName(stage != null ? stage.getStageName() : null)
                 .approvalComment(latest != null ? latest.getComment() : null)
+                .comments(comments)
                 .assignedTo(assignedEmails)
-                // ── PHASE 2: new DTO fields ───────────────────────────────────
                 .priorityScore(request.getPriorityScore())
                 .slaDeadline(request.getSlaDeadline())
                 .escalated(request.getEscalated())

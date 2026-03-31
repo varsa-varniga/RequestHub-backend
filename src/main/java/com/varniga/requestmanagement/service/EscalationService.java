@@ -2,8 +2,10 @@ package com.varniga.requestmanagement.service;
 
 import com.varniga.requestmanagement.entity.ApprovalHistory;
 import com.varniga.requestmanagement.entity.Request;
+import com.varniga.requestmanagement.entity.User;
 import com.varniga.requestmanagement.entity.WorkflowStage;
 import com.varniga.requestmanagement.enums.Decision;
+import com.varniga.requestmanagement.enums.NotificationType;
 import com.varniga.requestmanagement.repository.RequestRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
@@ -41,6 +43,7 @@ public class EscalationService {
     private final RequestRepository      requestRepository;
     private final ApprovalHistoryService historyService;
     private final PriorityService        priorityService;
+    private final NotificationService notificationService;
 
     /**
      * Scheduled job – runs every hour (3 600 000 ms).
@@ -53,7 +56,7 @@ public class EscalationService {
         log.info("[EscalationService] Running SLA check at {}", now);
 
         List<Request> overdueRequests =
-                requestRepository.findBySlaDeadlineBeforeAndEscalatedFalseAndStatusName("PENDING", now);
+                requestRepository.findSlaBreached(now, "PENDING");
 
         if (overdueRequests.isEmpty()) {
             log.info("[EscalationService] No overdue requests found.");
@@ -76,34 +79,66 @@ public class EscalationService {
         WorkflowStage currentStage = request.getCurrentStage();
         WorkflowStage nextStage    = request.getNextStage();
 
-        // Move to next stage if one exists; otherwise stay at the last stage
+        // 🔔 SLA BREACH notification to current assignee
+        if (request.getAssignedTo() != null) {
+            notificationService.createNotification(
+                    request.getAssignedTo().getId(),
+                    "SLA BREACHED: Immediate action required - " + request.getTitle(),
+                    NotificationType.SLA_ALERT
+            );
+        }
+
+        // Move to next stage if exists
         if (nextStage != null) {
             request.moveToNextStage();
+
             log.info("[EscalationService] Request {} moved from stage {} to stage {}",
                     request.getId(),
                     currentStage != null ? currentStage.getStageOrder() : "?",
                     nextStage.getStageOrder());
+
+            // 🔔 Notify NEXT stage approvers
+            if (nextStage.getAssignedUsers() != null) {
+                for (User user : nextStage.getAssignedUsers()) {
+                    notificationService.createNotification(
+                            user.getId(),
+                            "Escalated ticket requires your attention: " + request.getTitle(),
+                            NotificationType.TICKET_ASSIGNED
+                    );
+                }
+            }
+
         } else {
-            log.info("[EscalationService] Request {} is already at the last stage — marking escalated only.",
+            log.info("[EscalationService] Request {} already at last stage",
                     request.getId());
         }
 
-        // Mark escalated so the scheduler won't process it again
+        // Mark escalated
         request.setEscalated(true);
 
-        // Refresh priority score to reflect time-pending increase
+        // Refresh priority
         request.setPriorityScore(priorityService.calculatePriorityScore(request));
 
         requestRepository.save(request);
 
-        // Audit trail — reuse ApprovalHistory with Decision.ESCALATED
+        // 🧾 Audit log
         WorkflowStage stageToLog = nextStage != null ? nextStage : currentStage;
+
         historyService.saveHistory(
                 request,
                 stageToLog,
-                null,   // no human actor — system-driven
+                null,
                 Decision.ESCALATED,
-                "Auto-escalated by system: SLA deadline breached at " + request.getSlaDeadline()
+                "Auto-escalated by system: SLA breached at " + request.getSlaDeadline()
         );
+
+        // 🔔 Notify CREATOR also (important UX)
+        if (request.getCreatedBy() != null) {
+            notificationService.createNotification(
+                    request.getCreatedBy().getId(),
+                    "Your ticket has been escalated due to SLA breach: " + request.getTitle(),
+                    NotificationType.SLA_ALERT
+            );
+        }
     }
 }

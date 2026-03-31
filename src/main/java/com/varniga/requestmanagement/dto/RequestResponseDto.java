@@ -1,9 +1,11 @@
 package com.varniga.requestmanagement.dto;
 
+
 import lombok.Builder;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * DTO returned by RequestService and ApprovalService.
@@ -20,13 +22,17 @@ public class RequestResponseDto {
     private Long    id;
     private String  title;
     private String  description;
-    private String  requestType;
+    private String requestTypeCode;
+    private String requestTypeName;
     private String  urgency;         // emitted as "LOW" / "MEDIUM" / "HIGH"
     private String  status;
     private String  createdBy;
-    private Integer stageNumber;
+    private Integer currentStageOrder;
+    private String currentStageName;
     private String  approvalComment;
     private String  assignedTo;
+    private List<CommentDto> comments;
+
 
     // ── PHASE 2 fields ────────────────────────────────────────────────────────
     private Integer       priorityScore;  // ← NEW

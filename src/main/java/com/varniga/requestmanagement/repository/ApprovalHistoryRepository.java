@@ -16,6 +16,8 @@ public interface ApprovalHistoryRepository extends JpaRepository<ApprovalHistory
 
     List<ApprovalHistory> findByRequestAndStageOrder(Request request, Integer stageOrder);
 
+    List<ApprovalHistory> findByRequestOrderByCreatedAtAsc(Request request);
+
     // ✅ FIX 4: used by ApprovalHistoryService.getLatestHistory()
     // sorts by decidedAt (actual field name in ApprovalHistory entity)
     Optional<ApprovalHistory> findTopByRequestOrderByDecidedAtDesc(Request request);

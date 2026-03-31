@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * Manages the audit trail stored in ApprovalHistory.
@@ -20,6 +21,7 @@ import java.time.LocalDateTime;
 public class ApprovalHistoryService {
 
     private final ApprovalHistoryRepository historyRepository;
+
 
     /**
      * Persist an approval / escalation event.
@@ -57,6 +59,9 @@ public class ApprovalHistoryService {
     /**
      * Return the most recent history entry for a request, or null if none exist.
      */
+    public List<ApprovalHistory> getHistoryByRequest(Request request) {
+        return historyRepository.findByRequestOrderByCreatedAtAsc(request);
+    }
     public ApprovalHistory getLatestHistory(Request request) {
         // ✅ FIX 4: sort by decidedAt (actual field), not actedAt
         return historyRepository
