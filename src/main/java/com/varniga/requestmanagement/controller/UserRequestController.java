@@ -64,5 +64,18 @@ public class UserRequestController {
         return requestService.getAllRequestsByPriority();
     }
 
+    //==========delete request==============
+    // ── DELETE REQUEST ─────────────────────────────────────────────
+    @DeleteMapping("/{id}")
+    public ResponseEntity<String> deleteRequest(@PathVariable Long id,
+                                                @AuthenticationPrincipal UserDetails userDetails) {
 
+        if (userDetails == null) {
+            throw new RuntimeException("User not authenticated");
+        }
+
+        requestService.deleteRequest(id, userDetails.getUsername());
+
+        return ResponseEntity.ok("Request deleted successfully");
+    }
 }

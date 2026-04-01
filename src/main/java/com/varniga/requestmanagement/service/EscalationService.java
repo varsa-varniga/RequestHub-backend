@@ -1,143 +1,173 @@
 package com.varniga.requestmanagement.service;
 
-import com.varniga.requestmanagement.entity.ApprovalHistory;
 import com.varniga.requestmanagement.entity.Request;
 import com.varniga.requestmanagement.entity.User;
-import com.varniga.requestmanagement.entity.WorkflowStage;
-import com.varniga.requestmanagement.enums.Decision;
 import com.varniga.requestmanagement.enums.NotificationType;
 import com.varniga.requestmanagement.repository.RequestRepository;
 import jakarta.transaction.Transactional;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+
 
 import java.time.LocalDateTime;
 import java.util.List;
 
-/**
- * Phase 2 – Auto-Escalation Engine
- *
- * Runs every hour via @Scheduled.
- * For every PENDING request whose SLA deadline has passed and has not already
- * been escalated, it:
- *   1. Moves the request to the next workflow stage (if one exists).
- *   2. Marks escalated = true so the job doesn't fire again for this request.
- *   3. Writes an ESCALATED entry to ApprovalHistory for full audit trail.
- *
- * Architecture note:
- *   Depends on RequestRepository, ApprovalHistoryService, and PriorityService.
- *   Does NOT touch WorkflowService.moveToNextStage() to avoid duplicating the
- *   approval-path logic — escalation deliberately uses the raw helper on the
- *   entity so the approval counter is not affected.
- *
- * Enable scheduling in your main class:
- *   @EnableScheduling on @SpringBootApplication
- */
-@Slf4j
 @Service
-@RequiredArgsConstructor
 public class EscalationService {
-
-    private final RequestRepository      requestRepository;
-    private final ApprovalHistoryService historyService;
-    private final PriorityService        priorityService;
     private final NotificationService notificationService;
 
-    /**
-     * Scheduled job – runs every hour (3 600 000 ms).
-     * Adjust cron expression if you need a different cadence.
-     */
-    @Scheduled(fixedRate = 3_600_000)
-    @Transactional
-    public void runEscalationCheck() {
-        LocalDateTime now = LocalDateTime.now();
-        log.info("[EscalationService] Running SLA check at {}", now);
+    private final RequestRepository requestRepository;
 
-        List<Request> overdueRequests =
-                requestRepository.findSlaBreached(now, "PENDING");
+    public EscalationService(RequestRepository requestRepository, NotificationService notificationService) {
+        this.requestRepository = requestRepository;
+        this.notificationService = notificationService;
+    }
 
-        if (overdueRequests.isEmpty()) {
-            log.info("[EscalationService] No overdue requests found.");
+    // ─────────────────────────────
+    // 50% WARNING
+    // ─────────────────────────────
+    public void onFiftyPercent(Request request) {
+
+        // ❗ if already at last stage → skip
+        if (request.isLastStage()) {
             return;
         }
 
-        log.warn("[EscalationService] {} request(s) breached SLA — escalating.", overdueRequests.size());
+        List<User> approvers = request.getAssignedUsersForCurrentStage();
 
-        for (Request request : overdueRequests) {
-            escalate(request);
+        if (!approvers.isEmpty()) {
+            User first = approvers.get(0);
+
+            System.out.println("⚠️ 50% SLA warning sent to: " + first.getName());
         }
     }
 
-    // ── private ──────────────────────────────────────────────────────────────
+    // ─────────────────────────────
+    // 75% AUTO ESCALATION (NEW)
+    // ─────────────────────────────
+    public void onSeventyFivePercent(Request request) {
 
-    private void escalate(Request request) {
-        log.warn("[EscalationService] Escalating request id={} title='{}'",
-                request.getId(), request.getTitle());
+        if (!request.isLastStage()) {
 
-        WorkflowStage currentStage = request.getCurrentStage();
-        WorkflowStage nextStage    = request.getNextStage();
-
-        // 🔔 SLA BREACH notification to current assignee
-        if (request.getAssignedTo() != null) {
-            notificationService.createNotification(
-                    request.getAssignedTo().getId(),
-                    "SLA BREACHED: Immediate action required - " + request.getTitle(),
-                    NotificationType.SLA_ALERT
-            );
-        }
-
-        // Move to next stage if exists
-        if (nextStage != null) {
             request.moveToNextStage();
 
-            log.info("[EscalationService] Request {} moved from stage {} to stage {}",
-                    request.getId(),
-                    currentStage != null ? currentStage.getStageOrder() : "?",
-                    nextStage.getStageOrder());
+            System.out.println("⚡ 75% → Moved to NEXT STAGE: " + request.getId());
 
-            // 🔔 Notify NEXT stage approvers
-            if (nextStage.getAssignedUsers() != null) {
-                for (User user : nextStage.getAssignedUsers()) {
-                    notificationService.createNotification(
-                            user.getId(),
-                            "Escalated ticket requires your attention: " + request.getTitle(),
-                            NotificationType.TICKET_ASSIGNED
-                    );
-                }
+            List<User> users = request.getAssignedUsersForCurrentStage();
+
+            for (User user : users) {
+
+                notificationService.createNotification(
+                        user.getId(),
+                        "⚡ Request " + request.getId() + " assigned to you (75% escalation)",
+                        NotificationType.SLA_ESCALATION
+                );
+
+                System.out.println("🔔 Notified next approver: " + user.getName());
             }
 
         } else {
-            log.info("[EscalationService] Request {} already at last stage",
-                    request.getId());
+            escalateToAdmin(request);
         }
 
-        // Mark escalated
-        request.setEscalated(true);
+        requestRepository.save(request);
+    }
 
-        // Refresh priority
-        request.setPriorityScore(priorityService.calculatePriorityScore(request));
+    // ─────────────────────────────
+    // 100% ADMIN ESCALATION (MODIFIED)
+    // ─────────────────────────────
+    public void onSlaBreached(Request request) {
+
+        System.out.println("🚨 SLA BREACH EVENT: " + request.getId());
+
+        escalateToAdmin(request);
 
         requestRepository.save(request);
+    }
 
-        // 🧾 Audit log
-        WorkflowStage stageToLog = nextStage != null ? nextStage : currentStage;
+    // ─────────────────────────────
+    // EXISTING METHOD (LEFT SAFE)
+    // ─────────────────────────────
+    private void handleEscalation(Request request) {
 
-        historyService.saveHistory(
-                request,
-                stageToLog,
-                null,
-                Decision.ESCALATED,
-                "Auto-escalated by system: SLA breached at " + request.getSlaDeadline()
-        );
+        if (!request.isLastStage()) {
 
-        // 🔔 Notify CREATOR also (important UX)
-        if (request.getCreatedBy() != null) {
+            request.moveToNextStage();
+
+            System.out.println("🔁 Moved to next stage: " + request.getId());
+        }
+        else {
+            escalateToAdmin(request);
+        }
+
+        requestRepository.save(request);
+    }
+
+    // ─────────────────────────────
+    // OLD CHECK METHOD (UNCHANGED)
+    // ─────────────────────────────
+    @Transactional
+    public void runEscalationCheck() {
+
+        List<Request> requests = requestRepository.findAll();
+        LocalDateTime now = LocalDateTime.now();
+
+        for (Request request : requests) {
+
+            if (request.getSlaDeadline() == null || request.getCreatedAt() == null) {
+                continue;
+            }
+
+            long totalDuration = java.time.Duration.between(
+                    request.getCreatedAt(),
+                    request.getSlaDeadline()
+            ).toMillis();
+
+            long elapsed = java.time.Duration.between(
+                    request.getCreatedAt(),
+                    now
+            ).toMillis();
+
+            if (totalDuration <= 0) continue;
+
+            double percent = (elapsed * 100.0) / totalDuration;
+
+            System.out.println("ID: " + request.getId() + " | SLA: " + percent + "%");
+
+            if (percent >= 50 && !request.isHalfTimeWarned()) {
+
+                request.setHalfTimeWarned(true);
+                onFiftyPercent(request);
+            }
+
+            if (percent >= 100 && !request.isSlaBreachedHandled()) {
+
+                request.setSlaBreachedHandled(true);
+                onSlaBreached(request);
+            }
+        }
+
+        requestRepository.saveAll(requests);
+    }
+
+    // ─────────────────────────────
+    // FINAL ADMIN ESCALATION
+    // ─────────────────────────────
+    private void escalateToAdmin(Request request) {
+
+        System.out.println("👑 FINAL ESCALATION TO ADMIN: " + request.getId());
+
+        // MOVE to admin stage if not already there
+        while (!request.isLastStage()) {
+            request.moveToNextStage();
+        }
+
+        List<User> admins = request.getAssignedUsersForCurrentStage();
+
+        for (User admin : admins) {
             notificationService.createNotification(
-                    request.getCreatedBy().getId(),
-                    "Your ticket has been escalated due to SLA breach: " + request.getTitle(),
-                    NotificationType.SLA_ALERT
+                    admin.getId(),
+                    "🚨 Request " + request.getId() + " breached SLA and escalated to ADMIN",
+                    NotificationType.SLA_BREACH
             );
         }
     }

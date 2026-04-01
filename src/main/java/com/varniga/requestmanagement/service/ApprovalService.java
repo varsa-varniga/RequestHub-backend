@@ -180,7 +180,7 @@ public class ApprovalService {
                 .assignedTo(assignedEmails)
                 .priorityScore(request.getPriorityScore())
                 .slaDeadline(request.getSlaDeadline())
-                .escalated(request.getEscalated())
+                .escalated(request.isEscalated())
                 .build();
     }
 }

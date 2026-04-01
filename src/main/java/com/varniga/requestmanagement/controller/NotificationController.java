@@ -34,6 +34,12 @@ public class NotificationController {
         return "Notification marked as read";
     }
 
+    //get unread notifications
+    @GetMapping("/{userId}/unread")
+    public List<Notification> getUnreadNotifications(@PathVariable Long userId) {
+        return notificationService.getUnreadNotifications(userId);
+    }
+
     // Mark all as read
     @PutMapping("/{userId}/read-all")
     public String markAllAsRead(@PathVariable Long userId) {
