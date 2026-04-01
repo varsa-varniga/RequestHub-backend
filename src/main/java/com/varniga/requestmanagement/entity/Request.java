@@ -21,6 +21,8 @@ public class Request extends BaseEntity {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    private boolean deleted = false;
+
     private String title;
 
     @Column(length = 2000)
@@ -39,17 +41,26 @@ public class Request extends BaseEntity {
     // ─────────────────────────────────────────────
 
     private Integer priorityScore;
-
-    @Builder.Default
-    private Boolean escalated = false;
-
     private String priorityLevel;
-
     private LocalDateTime slaDeadline;
 
-    // optional fallback/debug only
     @Builder.Default
     private Integer currentStageOrder = 1;
+
+    // ─────────────────────────────────────────────
+    // SLA TRACKING
+    // ─────────────────────────────────────────────
+
+    @Builder.Default
+    private boolean escalated = false;
+
+    private LocalDateTime stageEnteredAt;
+
+    @Builder.Default
+    private boolean halfTimeWarned = false;
+
+    @Builder.Default
+    private boolean slaBreachedHandled = false;
 
     // ─────────────────────────────────────────────
     // RELATIONS
@@ -122,6 +133,13 @@ public class Request extends BaseEntity {
         if (next != null) {
             this.currentStage = next;
             this.currentStageOrder = next.getStageOrder();
+
+            // reset SLA timing
+            this.stageEnteredAt = LocalDateTime.now();
+
+            // reset flags
+            this.halfTimeWarned = false;
+            this.slaBreachedHandled = false;
         }
     }
 
@@ -134,6 +152,13 @@ public class Request extends BaseEntity {
             return List.of();
         }
         return List.copyOf(currentStage.getAssignedUsers());
+    }
+
+    public boolean isStageIdle(long minutes) {
+        if (stageEnteredAt == null) return false;
+        return java.time.Duration
+                .between(stageEnteredAt, LocalDateTime.now())
+                .toMinutes() > minutes;
     }
 
     public List<User> getAssignedUsersForNextStage() {

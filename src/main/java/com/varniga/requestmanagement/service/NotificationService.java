@@ -15,6 +15,10 @@ public class NotificationService {
     @Autowired
     private NotificationRepository notificationRepository;
 
+    public List<Notification> getUnreadNotifications(Long userId) {
+        return notificationRepository.findByUserIdAndIsReadFalse(userId);
+    }
+
     // Create Notification
     public void createNotification(Long userId, String message, NotificationType type) {
         Notification notification = Notification.builder()

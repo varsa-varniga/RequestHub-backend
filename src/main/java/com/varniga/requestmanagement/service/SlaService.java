@@ -1,73 +1,98 @@
 package com.varniga.requestmanagement.service;
 
+import com.varniga.requestmanagement.entity.SlaPolicy;
 import com.varniga.requestmanagement.enums.Urgency;
+import com.varniga.requestmanagement.entity.RequestType;
+import com.varniga.requestmanagement.repository.SlaPolicyRepository;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 
-/**
- * Phase 2 – SLA Deadline Calculator
- *
- * SLA matrix:
- *
- *   Type       | Urgency       | Deadline
- *   -----------|---------------|----------
- *   HARDWARE   | HIGH          | +24 h
- *   HARDWARE   | MEDIUM / LOW  | +48 h
- *   SOFTWARE   | HIGH          | +12 h
- *   SOFTWARE   | MEDIUM / LOW  | +24 h
- *   (default)  | any           | +72 h
- *
- * Architecture note:
- *   Called once during request creation inside RequestService.
- *   The returned LocalDateTime is persisted on Request.slaDeadline.
- *   EscalationService then reads slaDeadline to trigger auto-escalation.
- */
 @Service
 public class SlaService {
 
-    // ── SLA hours by type + urgency ──────────────────────────────────────────
-    private static final int HARDWARE_HIGH_HOURS    = 24;
-    private static final int HARDWARE_DEFAULT_HOURS = 48;
+    private final SlaPolicyRepository slaPolicyRepository;
 
-    private static final int SOFTWARE_HIGH_HOURS    = 12;
-    private static final int SOFTWARE_DEFAULT_HOURS = 24;
+    public SlaService(SlaPolicyRepository slaPolicyRepository) {
+        this.slaPolicyRepository = slaPolicyRepository;
+    }
 
-    private static final int DEFAULT_HOURS = 72;
-
-    /**
-     * Calculate SLA deadline from now.
-     *
-     * @param requestType the type string stored on the Request (e.g. "HARDWARE")
-     * @param urgency     the urgency string stored on the Request (e.g. "HIGH")
-     * @return deadline as an absolute LocalDateTime
-     */
+    // ─────────────────────────────────────────────
+    // MAIN METHOD (STRING BASED - BACKWARD COMPATIBLE)
+    // ─────────────────────────────────────────────
     public LocalDateTime calculateDeadline(String requestType, String urgency) {
+
         LocalDateTime now = LocalDateTime.now();
-        long hours = resolveHours(requestType, urgency);
+
+        long hours = resolveHoursFromDb(requestType, urgency);
+
         return now.plusHours(hours);
     }
 
-    // ── private helpers ──────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────
+    // ENUM BASED VERSION (FUTURE SAFE)
+    // ─────────────────────────────────────────────
+    public LocalDateTime calculateDeadline(RequestType requestType, Urgency urgency) {
 
-    private long resolveHours(String requestType, String urgency) {
-        boolean isHigh = isHighUrgency(urgency);
+        LocalDateTime now = LocalDateTime.now();
 
-        if (requestType == null) return DEFAULT_HOURS;
+        String type = requestType != null ? requestType.getName() : null;
+        String urg = urgency != null ? urgency.name() : null;
 
-        return switch (requestType.toUpperCase()) {
-            case "HARDWARE" -> isHigh ? HARDWARE_HIGH_HOURS : HARDWARE_DEFAULT_HOURS;
-            case "SOFTWARE" -> isHigh ? SOFTWARE_HIGH_HOURS : SOFTWARE_DEFAULT_HOURS;
-            default         -> DEFAULT_HOURS;
-        };
+        long hours = resolveHoursFromDb(type, urg);
+
+        return now.plusHours(hours);
     }
 
-    private boolean isHighUrgency(String urgency) {
-        if (urgency == null) return false;
-        try {
-            return Urgency.valueOf(urgency.toUpperCase()) == Urgency.HIGH;
-        } catch (IllegalArgumentException e) {
-            return false;
+    // ─────────────────────────────────────────────
+    // CORE LOGIC (DB FIRST, FALLBACK SECOND)
+    // ─────────────────────────────────────────────
+    private long resolveHoursFromDb(String requestType, String urgency) {
+        System.out.println("🔥 SLA DEBUG HIT: " + requestType + " | " + urgency);
+
+        if (requestType == null || urgency == null) {
+            long fallback = getDefaultHours();
+            System.out.println("SLA fallback used = " + fallback + " hours");
+            return fallback;
         }
+
+        try {
+            Urgency urgEnum = Urgency.valueOf(urgency.toUpperCase());
+
+            long hours = slaPolicyRepository
+                    .findByRequestTypeAndUrgency(requestType.toUpperCase(), urgEnum)
+                    .map(SlaPolicy::getSlaHours)
+                    .orElse(getDefaultHours());
+            System.out.println("SLA POLICY FROM DB = " + hours);
+
+
+            System.out.println(" SLA resolved hours = " + hours +
+                    " | requestType=" + requestType +
+                    " | urgency=" + urgency);
+
+            return hours;
+
+        } catch (Exception e) {
+            long fallback = getDefaultHours();
+            System.out.println(" SLA error, fallback used = " + fallback);
+            return fallback;
+        }
+    }
+
+    // ─────────────────────────────────────────────
+    // FALLBACK RULE (SAFE BACKUP)
+    // ─────────────────────────────────────────────
+    private long getDefaultHours() {
+        return 72;
+    }
+
+    // ─────────────────────────────────────────────
+    // FUTURE ESCALATION SUPPORT
+    // ─────────────────────────────────────────────
+    public LocalDateTime extendDeadline(LocalDateTime currentDeadline, long extraHours) {
+        if (currentDeadline == null) {
+            return LocalDateTime.now().plusHours(extraHours);
+        }
+        return currentDeadline.plusHours(extraHours);
     }
 }

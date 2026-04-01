@@ -8,9 +8,11 @@ import com.varniga.requestmanagement.enums.Decision;
 import com.varniga.requestmanagement.enums.NotificationType;
 import com.varniga.requestmanagement.enums.Urgency;
 import com.varniga.requestmanagement.repository.*;
+import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -86,10 +88,16 @@ public class RequestService {
                 .escalated(false)
                 .build();
 
+        request.setStageEnteredAt(LocalDateTime.now());
+        request.setHalfTimeWarned(false);
+        request.setSlaBreachedHandled(false);
+
         // 9. SLA
         request.setSlaDeadline(
                 slaService.calculateDeadline(requestType.getCode(), urgency.name())
         );
+
+
 
         // 10. SAVE
         Request saved = requestRepository.save(request);
@@ -132,7 +140,7 @@ public class RequestService {
         User user = userRepository.findByEmailIgnoreCase(email)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
-        return requestRepository.findByCreatedBy(user)
+        return requestRepository.findByCreatedByAndDeletedFalse(user)
                 .stream()
                 .map(this::mapToDto)
                 .collect(Collectors.toList());
@@ -179,7 +187,38 @@ public class RequestService {
                 .map(this::mapToDto)
                 .collect(Collectors.toList());
     }
+    //===================
+    //move to next stage
+    //===================
+    @Transactional
+    public void moveToNextStage(Long requestId) {
 
+        Request request = requestRepository.findById(requestId)
+                .orElseThrow(() -> new RuntimeException("Request not found"));
+
+        request.moveToNextStage();
+
+        request.setStageEnteredAt(LocalDateTime.now());
+        request.setHalfTimeWarned(false);
+        request.setSlaBreachedHandled(false);
+
+        requestRepository.save(request);
+    }
+
+    //==========delete request============//
+    public void deleteRequest(Long id, String username) {
+
+        Request request = requestRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Request not found"));
+
+        if (request.getCreatedBy() == null ||
+                !request.getCreatedBy().getEmail().equals(username)) {
+            throw new RuntimeException("Not allowed");
+        }
+
+        request.setDeleted(true);
+        requestRepository.save(request);
+    }
 
     // =========================
     // MAPPER
@@ -219,7 +258,7 @@ public class RequestService {
                 .assignedTo(assignedEmails)
                 .priorityScore(request.getPriorityScore())
                 .slaDeadline(request.getSlaDeadline())
-                .escalated(request.getEscalated())
+                .escalated(request.isEscalated())
                 .build();
     }
 }

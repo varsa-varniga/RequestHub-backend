@@ -34,10 +34,10 @@ public class WorkflowService {
     // =========================
     // CREATE WORKFLOW
     // =========================
+
     @Transactional
     public WorkflowResponseDto createWorkflow(WorkflowDto workflowDto) {
 
-        // ← FIXED: fetch RequestType from DB using code
         RequestType requestType = requestTypeRepository
                 .findByCode(workflowDto.getRequestTypeCode())
                 .orElseThrow(() -> new RuntimeException(
@@ -46,7 +46,6 @@ public class WorkflowService {
         Workflow workflow = new Workflow();
         workflow.setName(workflowDto.getName());
         workflow.setRequestType(requestType);
-        requestType.setWorkflow(workflow); // 🔥 VERY IMPORTANT
 
         if (workflowDto.getStages() != null) {
             for (WorkflowStageDto stageDto : workflowDto.getStages()) {
@@ -56,7 +55,7 @@ public class WorkflowService {
                 stage.setStageName(stageDto.getStageName());
                 stage.setApproverRole(stageDto.getApproverRole());
 
-                if (stageDto.getAssignedUserIds() != null && !stageDto.getAssignedUserIds().isEmpty()) {
+                if (stageDto.getAssignedUserIds() != null) {
                     Set<User> users = new HashSet<>(
                             userRepository.findAllById(stageDto.getAssignedUserIds())
                     );
@@ -67,9 +66,14 @@ public class WorkflowService {
             }
         }
 
-        Workflow saved = workflowRepository.save(workflow);
+        // 🔥 STEP 1: save workflow FIRST
+        Workflow savedWorkflow = workflowRepository.save(workflow);
+
+        // 🔥 STEP 2: link request type AFTER saving workflow
+        requestType.setWorkflow(savedWorkflow);
         requestTypeRepository.save(requestType);
-        return toResponseDto(saved);
+
+        return toResponseDto(savedWorkflow);
     }
 
     // =========================

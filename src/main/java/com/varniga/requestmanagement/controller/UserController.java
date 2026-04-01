@@ -8,6 +8,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @RestController
@@ -22,6 +23,27 @@ public class UserController {
     @PostMapping
     public UserResponseDto createUser(@RequestBody CreateUserDto dto) {
 
+        Optional<User> existingUserOpt = userRepository.findByEmailIgnoreCase(dto.getEmail());
+
+        if (existingUserOpt.isPresent()) {
+            User existingUser = existingUserOpt.get();
+
+            // 🔥 CASE 1: Soft-deleted user → REACTIVATE
+            if (!existingUser.isActive()) {
+                existingUser.setActive(true);
+                existingUser.setName(dto.getName());
+                existingUser.setPassword(passwordEncoder.encode(dto.getPassword()));
+                existingUser.setRole(dto.getRole());
+
+                User saved = userRepository.save(existingUser);
+                return mapToDto(saved);
+            }
+
+            // 🔥 CASE 2: Already active user exists
+            throw new RuntimeException("User already exists with this email");
+        }
+
+        // 🔥 CASE 3: New user
         User user = User.builder()
                 .name(dto.getName())
                 .email(dto.getEmail())
@@ -72,6 +94,28 @@ public class UserController {
 
         return mapToDto(updated);
     }
+
+    //==========================CHANGE PASSWORD====================//
+    @PostMapping("/{id}/change-password")
+    public String changePassword(@PathVariable Long id,
+                                 @RequestBody ChangePasswordDto dto) {
+
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        // verify old password
+        if (!passwordEncoder.matches(dto.getOldPassword(), user.getPassword())) {
+            throw new RuntimeException("Old password is incorrect");
+        }
+
+        // set new password (BCrypt hashed)
+        user.setPassword(passwordEncoder.encode(dto.getNewPassword()));
+
+        userRepository.save(user);
+
+        return "Password changed successfully";
+    }
+
 
     // ================= DELETE USER (FIXED - SOFT DELETE) =================
     @DeleteMapping("/{id}")
