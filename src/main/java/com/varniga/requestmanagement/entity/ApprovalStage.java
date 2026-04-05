@@ -37,8 +37,10 @@ public class ApprovalStage extends BaseEntity {
     @JoinColumn(name = "request_id", nullable = false)
     private Request request;
 
+
     @ManyToOne
     @JoinColumn(name = "approved_by")
     private User approvedBy;
+
 }
 

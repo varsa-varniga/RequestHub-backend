@@ -1,28 +1,41 @@
 package com.varniga.requestmanagement.dto;
 
+
 import lombok.Builder;
 import lombok.Data;
 
+import java.time.LocalDateTime;
+import java.util.List;
+
+/**
+ * DTO returned by RequestService and ApprovalService.
+ *
+ * PHASE 2 additions (marked ← NEW):
+ *   - priorityScore  : calculated by PriorityService
+ *   - slaDeadline    : calculated by SlaService at creation time
+ *   - escalated      : set to true by EscalationService after SLA breach
+ */
 @Data
 @Builder
 public class RequestResponseDto {
 
-    private Long id;
+    private Long    id;
+    private String  title;
+    private String  description;
+    private String requestTypeCode;
+    private String requestTypeName;
+    private String  urgency;         // emitted as "LOW" / "MEDIUM" / "HIGH"
+    private String  status;
+    private String  createdBy;
+    private Integer currentStageOrder;
+    private String currentStageName;
+    private String  approvalComment;
+    private String  assignedTo;
+    private List<CommentDto> comments;
 
-    private String title;
-    private String description;
 
-    private String requestType;
-    private String urgency;
-
-    private String status;
-
-    private String createdBy;
-
-    // 🔥 Workflow visibility
-    private Integer stageNumber;
-    private String approvalComment;
-
-    // 🔥 ADD THIS (important for admin + tracking)
-    private String assignedTo;
+    // ── PHASE 2 fields ────────────────────────────────────────────────────────
+    private Integer       priorityScore;  // ← NEW
+    private LocalDateTime slaDeadline;    // ← NEW
+    private Boolean       escalated;      // ← NEW
 }

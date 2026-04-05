@@ -5,5 +5,7 @@ public enum Role {
     ADMIN,
     MANAGER,
     IT,
-    COMPLIANCE
+    COMPLIANCE,
+    HR,
+    ACCOUNTS_PAYABLE
 }

@@ -1,5 +1,6 @@
 package com.varniga.requestmanagement.dto;
 
+
 import lombok.*;
 
 import java.util.List;
@@ -12,6 +13,6 @@ import java.util.List;
 public class WorkflowResponseDto {
     private Long id;
     private String name;
-    private String requestType;
+    private String requestTypeName;
     private List<WorkflowStageResponseDto> stages;
 }
