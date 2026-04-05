@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: requesthub-backend
+    env: java
+    buildCommand: mvn clean package -DskipTests
+    startCommand: java -jar target/*.jar
