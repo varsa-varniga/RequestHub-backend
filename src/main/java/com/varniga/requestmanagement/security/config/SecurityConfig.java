@@ -27,11 +27,8 @@ public class SecurityConfig {
     private final JwtAuthFilter jwtAuthFilter;
     private final CustomUserDetailsService userDetailsService;
 
-
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
-
-        System.out.println("🔥 SecurityConfig loaded");
 
         http
                 .csrf(AbstractHttpConfigurer::disable)
@@ -42,25 +39,24 @@ public class SecurityConfig {
 
                 .authorizeHttpRequests(auth -> auth
 
-                        // ✅ PUBLIC ENDPOINTS (must be first)
-                        .requestMatchers("/auth/**").permitAll()
-                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                        // ✅ PUBLIC APIs
+                        .requestMatchers("/auth/login", "/auth/refresh").permitAll()
                         .requestMatchers("/", "/health").permitAll()
+                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 
-                        // 🔐 ROLE-BASED ACCESS
+                        // 🔐 AUTH REQUIRED
+                        .requestMatchers("/auth/me", "/auth/logout").authenticated()
+
+                        // 🔐 ROLE-BASED
                         .requestMatchers("/workflows/**").hasAuthority("ADMIN")
                         .requestMatchers("/requests/**").hasAnyAuthority("USER", "ADMIN", "MANAGER")
                         .requestMatchers("/approvals/**").hasAnyAuthority("USER", "ADMIN", "MANAGER", "IT", "COMPLIANCE")
-                        .requestMatchers(HttpMethod.DELETE, "/user/requests/**")
-                        .hasAnyAuthority("USER", "ADMIN", "MANAGER")
-                        .requestMatchers("/user/**")
-                        .hasAnyAuthority("USER", "ADMIN", "MANAGER")
+                        .requestMatchers("/user/**").hasAnyAuthority("USER", "ADMIN", "MANAGER")
 
                         // 🔒 fallback
                         .anyRequest().authenticated()
                 )
 
-                // ✅ IMPORTANT: JWT filter AFTER config
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
