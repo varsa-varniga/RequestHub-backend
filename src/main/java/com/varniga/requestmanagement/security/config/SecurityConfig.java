@@ -32,9 +32,13 @@ public class SecurityConfig {
 
         http
                 .csrf(AbstractHttpConfigurer::disable)
+
+                // ✅ Enable CORS
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+
                 .userDetailsService(userDetailsService)
 
                 .authorizeHttpRequests(auth -> auth
@@ -53,11 +57,11 @@ public class SecurityConfig {
                         .hasAnyAuthority("USER", "ADMIN", "MANAGER", "IT", "COMPLIANCE")
                         .requestMatchers("/user/**").hasAnyAuthority("USER", "ADMIN", "MANAGER")
 
-                        // 🔒 FALLBACK - any other endpoint requires authentication
+                        // 🔒 EVERYTHING ELSE
                         .anyRequest().authenticated()
                 )
 
-                // ✅ JWT filter before Spring Security username/password filter
+                // ✅ JWT filter
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
@@ -74,16 +78,20 @@ public class SecurityConfig {
         return new BCryptPasswordEncoder();
     }
 
+    // ✅ FIXED CORS CONFIG (IMPORTANT)
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
 
-        // Allow all origins temporarily; for production, restrict to frontend domain
-        config.setAllowedOriginPatterns(List.of("*"));
+        // 🔥 IMPORTANT: Replace with your actual Vercel frontend URL
+        config.setAllowedOrigins(List.of(
+                "https://your-vercel-app.vercel.app"
+        ));
+
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
         config.setAllowedHeaders(List.of("*"));
         config.setExposedHeaders(List.of("Authorization"));
-        config.setAllowCredentials(true); // ✅ set to true for JWT auth
+        config.setAllowCredentials(true); // required for JWT
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
