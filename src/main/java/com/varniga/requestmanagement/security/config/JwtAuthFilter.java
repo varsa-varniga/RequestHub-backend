@@ -23,17 +23,15 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     private final JwtUtil jwtUtil;
     private final CustomUserDetailsService userDetailsService;
 
-    // ✅ Skip filter for public endpoints
+    // ✅ Skip ALL auth endpoints
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        String path = request.getServletPath();
-        String method = request.getMethod();
+        String path = request.getRequestURI();
 
-        return path.equals("/auth/login")
-                || path.equals("/auth/refresh")
+        return path.startsWith("/auth/")
                 || path.equals("/")
                 || path.equals("/health")
-                || "OPTIONS".equalsIgnoreCase(method);
+                || request.getMethod().equalsIgnoreCase("OPTIONS");
     }
 
     @Override
@@ -44,7 +42,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
         String authHeader = request.getHeader("Authorization");
 
-        // ✅ If no token → continue without blocking
+        // ✅ No token → continue
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             filterChain.doFilter(request, response);
             return;
@@ -55,10 +53,11 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         try {
             String username = jwtUtil.extractUsername(token);
 
-            if (username != null
-                    && SecurityContextHolder.getContext().getAuthentication() == null) {
+            if (username != null &&
+                    SecurityContextHolder.getContext().getAuthentication() == null) {
 
-                UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+                UserDetails userDetails =
+                        userDetailsService.loadUserByUsername(username);
 
                 if (jwtUtil.isTokenValid(token, userDetails)) {
 
@@ -77,8 +76,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 }
             }
 
-        } catch (Exception e) {
-            // optional: log error
+        } catch (Exception ignored) {
         }
 
         filterChain.doFilter(request, response);

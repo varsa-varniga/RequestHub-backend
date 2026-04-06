@@ -38,25 +38,26 @@ public class SecurityConfig {
                 .userDetailsService(userDetailsService)
 
                 .authorizeHttpRequests(auth -> auth
-
-                        // ✅ PUBLIC APIs
+                        // ✅ PUBLIC ENDPOINTS
                         .requestMatchers("/auth/login", "/auth/refresh").permitAll()
                         .requestMatchers("/", "/health").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 
-                        // 🔐 AUTH REQUIRED
+                        // 🔐 AUTHENTICATED ENDPOINTS
                         .requestMatchers("/auth/me", "/auth/logout").authenticated()
 
                         // 🔐 ROLE-BASED
                         .requestMatchers("/workflows/**").hasAuthority("ADMIN")
                         .requestMatchers("/requests/**").hasAnyAuthority("USER", "ADMIN", "MANAGER")
-                        .requestMatchers("/approvals/**").hasAnyAuthority("USER", "ADMIN", "MANAGER", "IT", "COMPLIANCE")
+                        .requestMatchers("/approvals/**")
+                        .hasAnyAuthority("USER", "ADMIN", "MANAGER", "IT", "COMPLIANCE")
                         .requestMatchers("/user/**").hasAnyAuthority("USER", "ADMIN", "MANAGER")
 
-                        // 🔒 fallback
+                        // 🔒 FALLBACK - any other endpoint requires authentication
                         .anyRequest().authenticated()
                 )
 
+                // ✅ JWT filter before Spring Security username/password filter
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
@@ -77,11 +78,12 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
 
+        // Allow all origins temporarily; for production, restrict to frontend domain
         config.setAllowedOriginPatterns(List.of("*"));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
         config.setAllowedHeaders(List.of("*"));
         config.setExposedHeaders(List.of("Authorization"));
-        config.setAllowCredentials(false);
+        config.setAllowCredentials(true); // ✅ set to true for JWT auth
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
