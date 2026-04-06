@@ -16,6 +16,10 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import java.util.List;
 
 @Configuration
 @RequiredArgsConstructor
@@ -24,7 +28,6 @@ public class SecurityConfig {
     private final CustomUserDetailsService userDetailsService;
     private final JwtAuthFilter jwtAuthFilter;
 
-    // ── AUTH PROVIDER ─────────────────────────────────────────────
     @Bean
     public AuthenticationProvider authenticationProvider() {
         DaoAuthenticationProvider provider = new DaoAuthenticationProvider();
@@ -33,65 +36,48 @@ public class SecurityConfig {
         return provider;
     }
 
-    // ── AUTH MANAGER ──────────────────────────────────────────────
     @Bean
     public AuthenticationManager authenticationManager(
             AuthenticationConfiguration config) throws Exception {
         return config.getAuthenticationManager();
     }
 
-    // ── SECURITY FILTER CHAIN ─────────────────────────────────────
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration config = new CorsConfiguration();
+        config.setAllowedOriginPatterns(List.of("*"));
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
+        config.setAllowedHeaders(List.of("*"));
+        config.setAllowCredentials(true);
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", config);
+        return source;
+    }
+
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
-
         http
                 .csrf(AbstractHttpConfigurer::disable)
-                .cors(org.springframework.security.config.Customizer.withDefaults())
-
-                // ── STATELESS — no HTTP session ──────────────────────
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-
                 .authenticationProvider(authenticationProvider())
-
-                // ── JWT filter runs before username/password filter ──
-                .addFilterBefore(jwtAuthFilter,
-                        UsernamePasswordAuthenticationFilter.class)
-
+                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
                 .authorizeHttpRequests(auth -> auth
-
-                        // Public endpoints
+                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/auth/login", "/auth/refresh", "/auth/logout").permitAll()
                         .requestMatchers("/users").permitAll()
-
-                        // Workflows (ADMIN only)
                         .requestMatchers("/workflows/**").hasAuthority("ADMIN")
-
-                        // Requests module
-                        .requestMatchers("/requests/**")
-                        .hasAnyAuthority("USER", "ADMIN", "MANAGER")
-
-                        // Approvals module
-                        .requestMatchers("/approvals/**")
-                        .hasAnyAuthority("USER", "ADMIN", "MANAGER", "IT", "COMPLIANCE")
-
-                        // Delete request (user module)
-                        .requestMatchers(HttpMethod.DELETE, "/user/requests/**")
-                        .hasAnyAuthority("USER", "ADMIN", "MANAGER")
-
-                        // User module
-                        .requestMatchers("/user/**")
-                        .hasAnyAuthority("USER", "ADMIN", "MANAGER")
-
-                        // Everything else must be authenticated
+                        .requestMatchers("/requests/**").hasAnyAuthority("USER", "ADMIN", "MANAGER")
+                        .requestMatchers("/approvals/**").hasAnyAuthority("USER", "ADMIN", "MANAGER", "IT", "COMPLIANCE")
+                        .requestMatchers(HttpMethod.DELETE, "/user/requests/**").hasAnyAuthority("USER", "ADMIN", "MANAGER")
+                        .requestMatchers("/user/**").hasAnyAuthority("USER", "ADMIN", "MANAGER")
                         .anyRequest().authenticated()
                 );
-        // httpBasic() is intentionally removed
 
         return http.build();
     }
 
-    // ── PASSWORD ENCODER ─────────────────────────────────────────
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
