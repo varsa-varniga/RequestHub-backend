@@ -85,7 +85,7 @@ public class SecurityConfig {
 
         // 🔥 IMPORTANT: Replace with your actual Vercel frontend URL
         config.setAllowedOrigins(List.of(
-                "https://your-vercel-app.vercel.app"
+                "https://request-hub-frontend.vercel.app"
         ));
 
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
