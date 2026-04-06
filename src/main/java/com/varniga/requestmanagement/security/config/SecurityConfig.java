@@ -44,7 +44,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // ✅ PUBLIC ENDPOINTS
                         .requestMatchers("/auth/login", "/auth/refresh").permitAll()
-                        .requestMatchers("/", "/health").permitAll()
+                        .requestMatchers("/", "/health", "/error").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 
                         // 🔐 AUTHENTICATED ENDPOINTS
