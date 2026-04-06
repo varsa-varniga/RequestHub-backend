@@ -23,63 +23,37 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     private final JwtUtil jwtUtil;
     private final CustomUserDetailsService userDetailsService;
 
+
     @Override
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
                                     FilterChain filterChain)
             throws ServletException, IOException {
 
-        String path = request.getRequestURI();
+        String path = request.getServletPath();
 
-        System.out.println("JWT FILTER HIT: " + path);
+        // ✅ SKIP ALL AUTH ENDPOINTS
+        if (path.startsWith("/auth/")) {
+            filterChain.doFilter(request, response);
+            return;
+        }
 
-        // ✅ HARD BYPASS for public auth endpoints
-        if (path.startsWith("/auth")) {
-            SecurityContextHolder.clearContext();
+        // ✅ SKIP OPTIONS (CORS preflight)
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
             filterChain.doFilter(request, response);
             return;
         }
 
         String authHeader = request.getHeader("Authorization");
 
-        // No token → continue normally (Spring will decide access)
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             filterChain.doFilter(request, response);
             return;
         }
 
-        String jwt = authHeader.substring(7);
+        String token = authHeader.substring(7);
 
-        try {
-            String userEmail = jwtUtil.extractUsername(jwt);
-
-            if (userEmail != null &&
-                    SecurityContextHolder.getContext().getAuthentication() == null) {
-
-                UserDetails userDetails =
-                        userDetailsService.loadUserByUsername(userEmail);
-
-                if (jwtUtil.isTokenValid(jwt, userDetails)) {
-
-                    UsernamePasswordAuthenticationToken authToken =
-                            new UsernamePasswordAuthenticationToken(
-                                    userDetails,
-                                    null,
-                                    userDetails.getAuthorities()
-                            );
-
-                    authToken.setDetails(
-                            new WebAuthenticationDetailsSource().buildDetails(request)
-                    );
-
-                    SecurityContextHolder.getContext().setAuthentication(authToken);
-                }
-            }
-
-        } catch (Exception e) {
-            System.out.println("JWT ERROR: " + e.getMessage());
-            SecurityContextHolder.clearContext();
-        }
+        // validate token here...
 
         filterChain.doFilter(request, response);
     }

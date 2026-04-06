@@ -27,6 +27,7 @@ public class SecurityConfig {
     private final JwtAuthFilter jwtAuthFilter;
     private final CustomUserDetailsService userDetailsService;
 
+
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 
@@ -38,23 +39,28 @@ public class SecurityConfig {
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .userDetailsService(userDetailsService)
+
                 .authorizeHttpRequests(auth -> auth
 
-                        // ✅ Public endpoints FIRST
+                        // ✅ PUBLIC ENDPOINTS (must be first)
                         .requestMatchers("/auth/**").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/", "/health").permitAll()
 
-                        // 🔐 Role-based endpoints
+                        // 🔐 ROLE-BASED ACCESS
                         .requestMatchers("/workflows/**").hasAuthority("ADMIN")
                         .requestMatchers("/requests/**").hasAnyAuthority("USER", "ADMIN", "MANAGER")
                         .requestMatchers("/approvals/**").hasAnyAuthority("USER", "ADMIN", "MANAGER", "IT", "COMPLIANCE")
-                        .requestMatchers(HttpMethod.DELETE, "/user/requests/**").hasAnyAuthority("USER", "ADMIN", "MANAGER")
-                        .requestMatchers("/user/**").hasAnyAuthority("USER", "ADMIN", "MANAGER")
+                        .requestMatchers(HttpMethod.DELETE, "/user/requests/**")
+                        .hasAnyAuthority("USER", "ADMIN", "MANAGER")
+                        .requestMatchers("/user/**")
+                        .hasAnyAuthority("USER", "ADMIN", "MANAGER")
 
                         // 🔒 fallback
                         .anyRequest().authenticated()
                 )
+
+                // ✅ IMPORTANT: JWT filter AFTER config
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
