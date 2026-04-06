@@ -23,54 +23,62 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     private final JwtUtil jwtUtil;
     private final CustomUserDetailsService userDetailsService;
 
-
     @Override
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
                                     FilterChain filterChain)
             throws ServletException, IOException {
-        String path = request.getServletPath();
 
-// 🔥 VERY IMPORTANT: skip JWT for auth endpoints
+        String path = request.getRequestURI();
+
+        System.out.println("JWT FILTER HIT: " + path);
+
+        // ✅ HARD BYPASS for public auth endpoints
         if (path.startsWith("/auth")) {
+            SecurityContextHolder.clearContext();
             filterChain.doFilter(request, response);
             return;
         }
 
-        final String authHeader = request.getHeader("Authorization");
+        String authHeader = request.getHeader("Authorization");
 
-        // No token — skip filter, let Security handle 401
+        // No token → continue normally (Spring will decide access)
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             filterChain.doFilter(request, response);
             return;
         }
 
-        final String jwt = authHeader.substring(7);
+        String jwt = authHeader.substring(7);
 
         try {
-            final String userEmail = jwtUtil.extractUsername(jwt);
+            String userEmail = jwtUtil.extractUsername(jwt);
 
-            // Only authenticate if not already authenticated in context
             if (userEmail != null &&
                     SecurityContextHolder.getContext().getAuthentication() == null) {
 
-                UserDetails userDetails = userDetailsService.loadUserByUsername(userEmail);
+                UserDetails userDetails =
+                        userDetailsService.loadUserByUsername(userEmail);
 
                 if (jwtUtil.isTokenValid(jwt, userDetails)) {
+
                     UsernamePasswordAuthenticationToken authToken =
                             new UsernamePasswordAuthenticationToken(
                                     userDetails,
                                     null,
                                     userDetails.getAuthorities()
                             );
+
                     authToken.setDetails(
                             new WebAuthenticationDetailsSource().buildDetails(request)
                     );
+
                     SecurityContextHolder.getContext().setAuthentication(authToken);
                 }
             }
+
         } catch (Exception e) {
-            // Invalid token — context stays empty, Spring returns 401
+            System.out.println("JWT ERROR: " + e.getMessage());
+            SecurityContextHolder.clearContext();
         }
 
         filterChain.doFilter(request, response);

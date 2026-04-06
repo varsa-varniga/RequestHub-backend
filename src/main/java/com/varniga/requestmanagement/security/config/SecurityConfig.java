@@ -18,7 +18,6 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
-import java.util.Arrays;
 import java.util.List;
 
 @Configuration
@@ -30,6 +29,9 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+
+        System.out.println("🔥 SecurityConfig loaded");
+
         http
                 .csrf(AbstractHttpConfigurer::disable)
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
@@ -37,15 +39,20 @@ public class SecurityConfig {
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .userDetailsService(userDetailsService)
                 .authorizeHttpRequests(auth -> auth
+
+                        // ✅ Public endpoints FIRST
+                        .requestMatchers("/auth/**").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/", "/health").permitAll()
-                        .requestMatchers("/auth/**", "/api/auth/**").permitAll()
-                        .requestMatchers("/users").permitAll()
+
+                        // 🔐 Role-based endpoints
                         .requestMatchers("/workflows/**").hasAuthority("ADMIN")
                         .requestMatchers("/requests/**").hasAnyAuthority("USER", "ADMIN", "MANAGER")
                         .requestMatchers("/approvals/**").hasAnyAuthority("USER", "ADMIN", "MANAGER", "IT", "COMPLIANCE")
                         .requestMatchers(HttpMethod.DELETE, "/user/requests/**").hasAnyAuthority("USER", "ADMIN", "MANAGER")
                         .requestMatchers("/user/**").hasAnyAuthority("USER", "ADMIN", "MANAGER")
+
+                        // 🔒 fallback
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
@@ -67,14 +74,16 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
+
         config.setAllowedOriginPatterns(List.of("*"));
-        config.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
         config.setAllowedHeaders(List.of("*"));
         config.setExposedHeaders(List.of("Authorization"));
         config.setAllowCredentials(false);
-        config.setMaxAge(3600L);
+
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
+
         return source;
     }
 }
