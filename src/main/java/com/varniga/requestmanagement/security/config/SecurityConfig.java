@@ -1,4 +1,5 @@
 package com.varniga.requestmanagement.security.config;
+import jakarta.servlet.http.HttpServletResponse;
 
 import com.varniga.requestmanagement.security.service.CustomUserDetailsService;
 import lombok.RequiredArgsConstructor;
@@ -42,9 +43,14 @@ public class SecurityConfig {
                 .userDetailsService(userDetailsService)
 
                 .authorizeHttpRequests(auth -> auth
-                        // ✅ PUBLIC ENDPOINTS
-                        .requestMatchers("/auth/login", "/auth/refresh").permitAll()
-                        .requestMatchers("/", "/health", "/error").permitAll()
+
+                        // ✅ PUBLIC AUTH ENDPOINTS (IMPORTANT FIX)
+                        .requestMatchers("/auth/**").permitAll()
+
+                        // ✅ PUBLIC SYSTEM ENDPOINTS (IMPORTANT FIX)
+                        .requestMatchers("/", "/health", "/error", "/error/**").permitAll()
+
+                        // ✅ Allow preflight requests
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 
                         // 🔐 AUTHENTICATED ENDPOINTS
@@ -59,6 +65,15 @@ public class SecurityConfig {
 
                         // 🔒 EVERYTHING ELSE
                         .anyRequest().authenticated()
+                )
+
+                // 🔥 HANDLE AUTH ERRORS PROPERLY (VERY IMPORTANT)
+                .exceptionHandling(ex -> ex
+                        .authenticationEntryPoint((request, response, authException) -> {
+                            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                            response.setContentType("application/json");
+                            response.getWriter().write("{\"error\": \"Unauthorized\"}");
+                        })
                 )
 
                 // ✅ JWT filter
