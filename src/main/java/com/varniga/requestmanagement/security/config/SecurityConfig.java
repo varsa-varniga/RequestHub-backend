@@ -46,6 +46,7 @@ public class SecurityConfig {
 
                         // ✅ PUBLIC AUTH ENDPOINTS (IMPORTANT FIX)
                         .requestMatchers("/auth/**").permitAll()
+                        .requestMatchers("/users").permitAll()
 
                         // ✅ PUBLIC SYSTEM ENDPOINTS (IMPORTANT FIX)
                         .requestMatchers("/", "/health", "/error", "/error/**").permitAll()
