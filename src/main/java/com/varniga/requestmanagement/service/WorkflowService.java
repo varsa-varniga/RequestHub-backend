@@ -55,7 +55,7 @@ public class WorkflowService {
                 stage.setStageName(stageDto.getStageName());
                 stage.setApproverRole(stageDto.getApproverRole());
 
-                if (stageDto.getAssignedUserIds() != null) {
+                if (stageDto.getAssignedUserIds() != null && !stageDto.getAssignedUserIds().isEmpty()) {
                     Set<User> users = new HashSet<>(
                             userRepository.findAllById(stageDto.getAssignedUserIds())
                     );
@@ -66,14 +66,13 @@ public class WorkflowService {
             }
         }
 
-        // 🔥 STEP 1: save workflow FIRST
         Workflow savedWorkflow = workflowRepository.save(workflow);
+        workflowRepository.flush();
 
-        // 🔥 STEP 2: link request type AFTER saving workflow
-        requestType.setWorkflow(savedWorkflow);
-        requestTypeRepository.save(requestType);
+        Workflow freshWorkflow = workflowRepository.findById(savedWorkflow.getId())
+                .orElseThrow();
 
-        return toResponseDto(savedWorkflow);
+        return toResponseDto(freshWorkflow);
     }
 
     // =========================
@@ -203,8 +202,13 @@ public class WorkflowService {
             }
         }
 
-        Workflow saved = workflowRepository.save(workflow);
-        return toResponseDto(saved);
+        Workflow savedWorkflow = workflowRepository.save(workflow);
+        workflowRepository.flush();
+
+        Workflow freshWorkflow = workflowRepository.findById(savedWorkflow.getId())
+                .orElseThrow();
+
+        return toResponseDto(freshWorkflow);
     }
 
     // =========================
